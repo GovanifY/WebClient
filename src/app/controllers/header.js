@@ -1,12 +1,13 @@
 angular.module("proton.controllers.Header", [])
 
 .controller("HeaderController", function(
+    $log,
+    $rootScope,
     $scope,
     $state,
     $stateParams,
-    wizardModal,
-    $rootScope,
-    $log
+    authentication,
+    wizardModal
 ) {
     $scope.params = {
         searchInput: $stateParams.words || ''
@@ -51,5 +52,37 @@ angular.module("proton.controllers.Header", [])
 
     $scope.openWizard = function() {
         openWizardModal('ProtonMail Wizard', 'startWizard');
+    };
+
+    $scope.displayName = function() {
+        var displayName = '';
+
+        if(authentication.user) {
+            displayName = authentication.user.DisplayName || authentication.user.Name;
+        } else if($rootScope.tempUser && $rootScope.tempUser.username) {
+            displayName = $rootScope.tempUser.username;
+        }
+
+        // Truncate
+        if (displayName && displayName.length > 20) {
+            displayName = displayName.substring(0, 17) + '...';
+        }
+
+        return displayName;
+    };
+
+    $scope.email = function() {
+        if (authentication.user) {
+            var address = _.findWhere(authentication.user.Addresses, {Send: 1});
+            if (address) {
+                return address.Email;
+            }
+            else {
+                return '';
+            }
+        }
+        else {
+            return '';
+        }
     };
 });

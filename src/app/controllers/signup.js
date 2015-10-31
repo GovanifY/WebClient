@@ -36,6 +36,8 @@ angular.module("proton.controllers.Signup", ["proton.tools"])
         $scope.getUserInfo =        false;
         $scope.finishCreation =     false;
 
+        $scope.maxPW = CONSTANTS.LOGIN_PW_MAX_LEN;
+
         $scope.account = [];
 
         // Prepoppulate the username if from an invite link
@@ -78,11 +80,17 @@ angular.module("proton.controllers.Signup", ["proton.tools"])
                 .then( $scope.doGetUserInfo )
                 .then( $scope.finishRedirect )
                 .catch( function(err) {
+                    var msg = err;
+                    if (typeof msg !== "string") {
+                        msg = err.toString();
+                    }
+                    if (typeof msg !== "string") {
+                        msg = "Something went wrong";
+                    }
                     notify({
                         classes: 'notification-danger',
-                        message: err
+                        message: msg
                     });
-                    $log.error(err);
                     $scope.signupError= true;
                 })
             );
@@ -93,36 +101,12 @@ angular.module("proton.controllers.Signup", ["proton.tools"])
         $log.debug('finish');
         if (form.$valid) {
             $log.debug('finish: form valid');
-            return $scope.generateKeys('UserID', $scope.account.mailboxPassword);
+            return $scope.generateKeys($scope.account.Username, $scope.account.mailboxPassword);
         }
     };
 
     $scope.finishLoginReset = function(form) {
         $log.debug('finishLoginReset');
-    };
-
-    $scope.strength = function(password) {
-        var daysToCrack = mellt.CheckPassword(password);
-        var word;
-
-        if (daysToCrack < 100) {
-            word = 'Very Weak';
-        } else if (daysToCrack < 1000) {
-            word = 'Weak';
-        } else if (daysToCrack < 10000) {
-            word = 'Okay';
-        } else if (daysToCrack < 100000) {
-            word = 'Good';
-        } else if (daysToCrack < 1000000) {
-            word = 'Strong';
-        } else {
-            word = 'Very Strong';
-        }
-
-        return {
-            number: daysToCrack,
-            word: word
-        };
     };
 
     $scope.generateKeys = function(userID, pass) {
@@ -163,8 +147,8 @@ angular.module("proton.controllers.Signup", ["proton.tools"])
             User.available({ username: $scope.account.Username }).$promise
             .then(
                 function(response) {
-                    if (response.error) {
-                        var error_message = (response.error) ? response.error : (response.statusText) ? response.statusText : 'Error.';
+                    if (response.data) {
+                        var error_message = (response.data.Error) ? response.data.Error : (response.statusText) ? response.statusText : 'Error.';
                         $('#Username').focus();
                         deferred.reject(error_message);
                     }
@@ -194,7 +178,7 @@ angular.module("proton.controllers.Signup", ["proton.tools"])
         else if ($scope.account.mailboxPassword!==undefined) {
             mbpw = $scope.account.mailboxPassword;
         }
-        return $scope.generateKeys('UserID', mbpw);
+        return $scope.generateKeys($scope.account.Username + '@protonmail.ch', mbpw);
     };
 
     $scope.doCreateUser = function() {
@@ -206,7 +190,6 @@ angular.module("proton.controllers.Signup", ["proton.tools"])
             return;
         }
         else {
-            $scope.createUser  = true;
             var params = {
                 "response_type": "token",
                 "client_id": "demoapp",
@@ -227,7 +210,13 @@ angular.module("proton.controllers.Signup", ["proton.tools"])
             }
             $rootScope.tempUser.username = $scope.account.Username;
             $rootScope.tempUser.password = $scope.account.loginPassword;
-            return User.create(params).$promise;
+            return User.create(params).$promise.then( function(response) {
+                $log.debug(response);
+                if (response.Code===1000) {
+                    $scope.createUser  = true;
+                }
+                return response;
+            });
         }
     };
 

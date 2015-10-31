@@ -219,7 +219,9 @@ angular.module("proton.models.message", ["proton.constants"])
                 $translate.instant('END_TO_END_ENCRYPTED_FOR_OUTSIDE'),
                 $translate.instant('EXTERNAL_MESSAGE_STORED_ENCRYPTED'),
                 $translate.instant('STORED_ENCRYPTED'),
-                $translate.instant('END_TO_END_ENCRYPTED_FOR_OUTSIDE_REPLY')
+                $translate.instant('END_TO_END_ENCRYPTED_FOR_OUTSIDE_REPLY'),
+                $translate.instant('ENCRYPTED_PGP'),
+                $translate.instant('ENCRYPTED_PGP_MIME'),
             ];
 
             return texts[this.IsEncrypted];
@@ -253,9 +255,6 @@ angular.module("proton.models.message", ["proton.constants"])
         },
 
         setMsgBody: function() {
-
-            $log.debug('setMsgBody');
-
             var body;
 
             // get the message content from either the editor or textarea if its iOS
@@ -302,9 +301,20 @@ angular.module("proton.models.message", ["proton.constants"])
             this.promises = _.union(this.promises, [promise]);
 
             promise.catch(function(result) {
-                if(angular.isDefined(result.Error)) {
-                    notify({message: result.Error, classes: 'notification-danger'});
+                if(angular.isDefined(result)) {
                     $log.error(result);
+                    if ( angular.isDefined( result.message ) ) {
+                        notify({message: result.message, classes: 'notification-danger'});
+                    }
+                    else if ( angular.isDefined( result.Error ) ) {
+                        notify({message: result.Error, classes: 'notification-danger'});
+                    }
+                    else if ( angular.isDefined( result.data ) && angular.isDefined( result.data.Error ) ) {
+                        notify({message: result.data.Error, classes: 'notification-danger'});
+                    }
+                    else if ( angular.isString( result ) ) {
+                        notify({message: result, classes: 'notification-danger'});
+                    }
                 }
             });
 
@@ -412,7 +422,7 @@ angular.module("proton.models.message", ["proton.constants"])
 
         generateReplyToken: function() {
             // Use a base64-encoded AES256 session key as the reply token
-            return pmcw.encode_base64(pmcw.generateKeyAES());
+            return pmcw.encode_base64(pmcw.arrayToBinaryString(pmcw.generateKeyAES()));
         },
 
         clearTextBody: function() {
@@ -420,38 +430,57 @@ angular.module("proton.models.message", ["proton.constants"])
             var deferred = $q.defer();
 
             if (this.isDraft() || (!_.isUndefined(this.IsEncrypted) && parseInt(this.IsEncrypted))) {
-
                 if (_.isUndefined(this.DecryptedBody) && !!!this.decrypting) {
                     this.decrypting = true;
 
                     try {
-                        authentication.getPrivateKey().then(function(key) {
-                            pmcw.decryptMessageRSA(this.Body, key, this.Time).then(function(result) {
-                                this.DecryptedBody = result;
-                                this.failedDecryption = false;
-                                this.decrypting = false;
-                                deferred.resolve(result);
-                            }.bind(this));
-                        }.bind(this));
-                    } catch (err) {
-                        this.DecryptedBody = "";
+                        authentication.getPrivateKey()
+                        .then(
+                            function(key) {
+                                pmcw.decryptMessageRSA(this.Body, key, this.Time)
+                                .then(
+                                    function(result) {
+                                        this.DecryptedBody = result;
+                                        this.failedDecryption = false;
+                                        deferred.resolve(result);
+                                    }.bind(this),
+                                    function(err) {
+                                        this.failedDecryption = true;
+                                        deferred.reject(err);
+                                    }.bind(this)
+                                );
+                            }.bind(this),
+                            function(err) {
+                                this.failedDecryption = true;
+                                deferred.reject(err);
+                            }.bind(this)
+                        );
+                    }
+                    catch (err) {
                         this.failedDecryption = true;
+                        deferred.reject(err);
                     }
                 } else {
+                    this.failedDecryption = false;
                     deferred.resolve(this.DecryptedBody);
                 }
             } else {
                 deferred.resolve(this.Body);
             }
 
+            this.decrypting = false;
             return deferred.promise;
         },
 
         clearImageBody: function(body) {
+            if (body===undefined) {
+                return body;
+            }
             if (this.containsImage === false || body.match('<img') === null) {
                 this.containsImage = false;
             } else {
                 this.containsImage = true;
+
                 if (angular.isUndefined(this.imagesHidden) || this.imagesHidden === true) {
                     this.imagesHidden = true;
                     body = tools.breakImages(body);

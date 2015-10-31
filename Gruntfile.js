@@ -3,14 +3,14 @@
 
 var _ = require("lodash"),
 util = require("util");
-var appVersion = '2.0.5';
+var appVersion = '2.0.25';
 var apiVersion = '1';
+var dateVersion = '15 September 2015';
 var clientID = 'Angular';
 var clientSecret = '00a11965ac0b47782ec7359c5af4dd79';
 var BROWSERS = ["PhantomJS", "Chrome", "Firefox", "Safari"];
 var API_TARGETS = {
-    prod: "https://dev.protonmail.ch/api",
-    dev: "https://test-api.protonmail.ch",
+    prod: "https://protonmail.ch/api",
     build: "/api"
 };
 
@@ -105,6 +105,7 @@ module.exports = function(grunt) {
                         apiUrl: apiUrl(),
                         app_version: appVersion,
                         api_version: apiVersion,
+                        date_version: dateVersion,
                         clientID: clientID,
                         clientSecret: clientSecret
                     }
@@ -117,85 +118,11 @@ module.exports = function(grunt) {
                         apiUrl: apiUrl(),
                         app_version: appVersion,
                         api_version: apiVersion,
+                        date_version: dateVersion,
                         clientID: clientID,
                         clientSecret: clientSecret
                     }
                 }
-            }
-        },
-
-        replace: {
-            build: {
-                options: {
-                    patterns: [
-                        {
-                            json: {
-                                "appVersion": appVersion, // replaces "@@appVersion" to the value of 'appVersion' variable
-                                "apiVersion": apiVersion, // replaces "@@apiVersion" to the value of 'apiVersion' variable
-                            }
-                        }
-                    ]
-                },
-                files: [
-                    {
-                        expand: true,
-                        flatten: true,
-                        src: ["<%= build_dir %>/**/*.html"],
-                        dest: "<%= build_dir %>/"
-                    },
-                    {
-                        expand: true,
-                        flatten: true,
-                        src: ["<%= build_dir %>/pages/**/*.html"],
-                        dest: "<%= build_dir %>/pages"
-                    }
-                ]
-            },
-            compile: {
-                options: {
-                    patterns: [
-                        {
-                            json: {
-                                "appVersion": appVersion, // replaces "@@appVersion" to the value of 'appVersion' variable
-                                "apiVersion": apiVersion // replaces "@@apiVersion" to the value of 'apiVersion' variable
-                            }
-                        }
-                    ]
-                },
-                files: [
-                    {
-                        expand: true,
-                        flatten: true,
-                        src: ["<%= compile_dir %>/**/*.html"],
-                        dest: "<%= compile_dir %>/"
-                    },
-                    {
-                        expand: true,
-                        flatten: true,
-                        src: ["<%= compile_dir %>/pages/**/*.html"],
-                        dest: "<%= compile_dir %>/pages"
-                    }
-                ]
-            },
-            dist2: {
-                options: {
-                    patterns: [
-                        {
-                            json: {
-                                "appVersion": appVersion, // replaces "@@appVersion" to the value of 'appVersion' variable
-                                "apiVersion": apiVersion // replaces "@@apiVersion" to the value of 'apiVersion' variable
-                            }
-                        }
-                    ]
-                },
-                files: [
-                    {
-                        expand: true,
-                        flatten: true,
-                        src: ["<%= build_dir %>/pages/*.html"],
-                        dest: "<%= build_dir %>/pages/"
-                    }
-                ]
             }
         },
 
@@ -322,22 +249,6 @@ module.exports = function(grunt) {
                     expand: true
                 }]
             },
-            build_static: {
-                files: [{
-                    src: ["**"],
-                    dest: "<%= build_dir %>/",
-                    cwd: "./src/static",
-                    expand: true
-                }]
-            },
-            compile_static: {
-                files: [{
-                    src: ["**"],
-                    dest: "<%= compile_dir %>/",
-                    cwd: "./src/static",
-                    expand: true
-                }]
-            },
             build_vendorjs: {
                 files: [{
                     src: ["<%= vendor_files.js %>"],
@@ -424,49 +335,6 @@ module.exports = function(grunt) {
                 },
                 files: {
                     "<%= build_dir %>/assets/application.css": "<%= app_files.sass %>"
-                }
-            }
-        },
-
-        includes: {
-            files: {
-                src: [ "*.html" ],
-                dest: "<%= build_dir %>/pages",
-                cwd: "src/static/pages",
-                options: {
-                    duplicates: false,
-                    flatten: true,
-                    includePath: "src/static/pages"
-                }
-            },
-            app: {
-                src: [ "*.html" ],
-                dest: "<%= build_dir %>/",
-                cwd: "src/static",
-                options: {
-                    duplicates: false,
-                    flatten: true,
-                    includePath: "src/static"
-                }
-            },
-            static_files: {
-                src: [ "*.html" ],
-                dest: "<%= compile_dir %>/pages",
-                cwd: "src/static/pages",
-                options: {
-                    duplicates: false,
-                    flatten: true,
-                    includePath: "src/static/pages"
-                }
-            },
-            static_app: {
-                src: [ "*.html" ],
-                dest: "<%= compile_dir %>/",
-                cwd: "src/static",
-                options: {
-                    duplicates: false,
-                    flatten: true,
-                    includePath: "src/static"
                 }
             }
         },
@@ -727,15 +595,22 @@ module.exports = function(grunt) {
                     "git remote add origin git@github.com:ProtonMail/Angular.git",
                     "git fetch origin",
                     "git checkout -b deploy origin/deploy",
-                    "for file in `ls assets | grep -E '.*[a-f0-9]{16}\..*'`; do git rm assets/$file; done"
+                    "rm -rf *"
                 ].join("&&")
             },
             push: {
                 command: [
                     "cd dist",
+                    "git ls-files --deleted -z | xargs -0 git rm",
                     "git add --all",
                     "git commit -m \"New Release\"",
                     "git push"
+                ].join("&&")
+            },
+            bower: {
+                command: [
+                    // "[ -d vendor/ ] && rm -r vendor",
+                    "bower update"
                 ].join("&&")
             }
         },
@@ -757,8 +632,6 @@ module.exports = function(grunt) {
     grunt.loadNpmTasks('grunt-notify');
     grunt.loadNpmTasks('grunt-ng-constant');
     grunt.loadNpmTasks('grunt-uncss');
-    grunt.loadNpmTasks('grunt-includes');
-    grunt.loadNpmTasks('grunt-replace');
 
     grunt.renameTask("watch", "delta");
     grunt.registerTask("watch", [
@@ -788,15 +661,11 @@ module.exports = function(grunt) {
         "copy:build_app_assets",
         "copy:build_vendor_assets",
         "copy:build_appjs",
-        "copy:build_static",
         "copy:build_vendorjs",
         "copy:build_external",
         "copy:build_fonts",
         "copy:build_editor",
         "index:build",
-        "includes:app",
-        "includes:files",
-        "replace:build",
         "testconfig",
         "clean:after"
     ]);
@@ -804,11 +673,7 @@ module.exports = function(grunt) {
     grunt.registerTask("compile", [
         "ngconstant:prod",
         "build",
-        "copy:compile_static",
         "copy:compile_assets",
-        "includes:static_app",
-        "includes:static_files",
-        "replace:compile",
         "copy:compile_fonts",
         "ngAnnotate",
         "cssmin",
@@ -822,6 +687,7 @@ module.exports = function(grunt) {
     ]);
 
     grunt.registerTask("deploy", [
+        "bower",
         "copy:compile_editor",
         "clean:dist",
         "shell:setup_dist",
@@ -831,6 +697,10 @@ module.exports = function(grunt) {
         "clean:after",
         "shell:push",
         "wait:push"
+    ]);
+
+    grunt.registerTask("bower", [
+        "shell:bower"
     ]);
 
     grunt.registerTask("default", ["watch"]);

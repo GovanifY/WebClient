@@ -16,11 +16,14 @@ angular.module("proton.controllers.Auth", [
     authentication,
     networkActivityTracker,
     notify,
+    loginModal,
     pmcw
 ) {
     $rootScope.pageName = "Login";
     $rootScope.app_version = CONFIG.app_version;
+    $rootScope.date_version = CONFIG.date_version;
     $rootScope.tempUser = $rootScope.tempUser || [];
+    $scope.maxPW = CONSTANTS.LOGIN_PW_MAX_LEN;
 
     if ($rootScope.isLoggedIn && $rootScope.isLocked === false && $rootScope.user === undefined) {
         try {
@@ -32,8 +35,32 @@ angular.module("proton.controllers.Auth", [
         }
     }
 
+    $scope.initialization = function() {
+        var ua = window.navigator.userAgent;
+        var iOS = !!ua.match(/iPad/i) || !!ua.match(/iPhone/i);
+        var webkit = !!ua.match(/WebKit/i);
+        var iOSSafari = iOS && webkit && !ua.match(/CriOS/i);
+
+        if (iOSSafari) {
+            // Don't focus the input field
+        } else {
+            $('input.focus').focus();
+        }
+    };
+
+    $scope.getLoginHelp = function() {
+        loginModal.activate({
+            params: {
+                cancel: function() {
+                    loginModal.deactivate();
+                }
+            }
+        });
+    };
+
     var clearErrors = function() {
         $scope.error = null;
+        notify.closeAll();
     };
 
     // this does not add security and was only active for less than a day in 2013.
@@ -52,14 +79,37 @@ angular.module("proton.controllers.Auth", [
     $rootScope.tryLogin = function() {
         $('input').blur();
         clearErrors();
-        // transform to lowercase and remove the domain
-        $scope.username = $scope.username.toLowerCase().split('@')[0];
 
-        // custom validation
-        if (pmcw.encode_utf8($scope.password).length > CONSTANTS.LOGIN_PW_MAX_LEN) {
+        // Check username and password
+        if(
+            angular.isUndefined($scope.username) ||
+            angular.isUndefined($scope.password) ||
+            $scope.username.length === 0 ||
+            $scope.password.length === 0
+        ) {
             notify({
                 classes: 'notification-danger',
-                message: 'Passwords are limited to '+CONSTANTS.LOGIN_PW_MAX_LEN+' characters.'
+                message: 'Please enter your username and password.'
+            });
+            return;
+        }
+
+        // Transform to lowercase and remove the domain
+        $scope.username = $scope.username.toLowerCase().split('@')[0];
+
+        // Custom validation
+        try {
+            if (pmcw.encode_utf8($scope.password).length > CONSTANTS.LOGIN_PW_MAX_LEN) {
+                notify({
+                    classes: 'notification-danger',
+                    message: 'Passwords are limited to '+CONSTANTS.LOGIN_PW_MAX_LEN+' characters.'
+                });
+                return;
+            }
+        } catch(err) {
+            notify({
+                classes: 'notification-danger',
+                message: err.message
             });
             return;
         }
@@ -67,65 +117,78 @@ angular.module("proton.controllers.Auth", [
         networkActivityTracker.track(
             authentication.loginWithCredentials({
                 Username: $scope.username,
-                Password: $scope.password,
-                HashedPassword: $scope.basicObfuscate($scope.username, $scope.password)
+                Password: $scope.password
             })
             .then(
                 function(result) {
                     $log.debug('loginWithCredentials:result.data ', result);
-                    if (result.data.Code!==undefined) {
-                        if (result.data.Code===401) {
-                            notify({
-                                classes: 'notification-danger',
-                                message: result.data.ErrorDescription
-                            });
-                        }
-                        // TODO: where is tempUser used?
-                    	else if (result.data.AccessToken) {
-                            $rootScope.isLoggedIn = true;
-                            $rootScope.tempUser = {};
-                            $rootScope.tempUser.username = $scope.username;
-                            $rootScope.tempUser.password = $scope.password;
+                    if (angular.isDefined(result.data) && angular.isDefined(result.data.Code) && result.data.Code === 401) {
 
-                            // console.log('Going to unlock page.');
-                            $state.go("login.unlock");
-                            return;
-    	                }
-                    }
-	                else if (result.Error) {
-	                	var error  = (result.Code === 401) ? 'Wrong Username or Password' : (result.error_description) ? result.error_description : result.Error;
-	                	notify({
+                        $scope.selectPassword();
+
+                        notify({
+                            classes: 'notification-danger',
+                            message: result.data.ErrorDescription
+                        });
+                    } else if (angular.isDefined(result.data) && angular.isDefined(result.data.Code) && result.data.Code === 10002) {
+                        var message;
+
+                        if (result.data.Error) {
+                            message = result.data.Error;
+                        } else {
+                            message = "Your account has been disabled.";
+                        }
+                        // This account is disabled.
+                        notify({
+                            classes: 'notification-danger',
+                            message: message
+                        });
+                    } else if (angular.isDefined(result.data) && angular.isDefined(result.data.AccessToken)) {
+                        // TODO: where is tempUser used?
+                        $rootScope.isLoggedIn = true;
+                        $rootScope.tempUser = {};
+                        $rootScope.tempUser.username = $scope.username;
+                        $rootScope.tempUser.password = $scope.password;
+
+                        $state.go("login.unlock");
+                        return;
+                    } else if (angular.isDefined(result.Error)) {
+                        // TODO: This might be buggy
+	                	var error  = (result.Code === 401) ? 'Wrong Username or Password' : (result.ErrorDescription) ? result.ErrorDescription : result.Error;
+
+                        notify({
 	                        classes: 'notification-danger',
 	                        message: error
 	                    });
-	                }
-	                else {
+	                } else {
 	                	notify({
 	                        classes: 'notification-danger',
 	                        message: 'Unable to log you in.'
 	                    });
 	                }
-	                return;
                 },
                 function(result) {
-                    // console.log(result);
-                    if (result.message===undefined) {
+                    if (result.message === undefined) {
                         result.message = 'Sorry, our login server is down. Please try again later.';
                     }
+
                     notify({
                         classes: 'notification-danger',
                         message: result.message
                     });
+
                     $('input[name="Username"]').focus();
                 }
             )
         );
     };
 
-    $scope.tryDecrypt = function() {
-        $('input').blur();
-        var mailboxPassword = this.mailboxPassword;
+    $scope.tryUnlock = function() {
+        // Make local so extensions (or Angular) can't mess with it by clearing the form too early
+        var mailboxPassword = $scope.mailboxPassword;
+
         clearErrors();
+
         networkActivityTracker.track(
             authentication.unlockWithPassword(
                 $rootScope.TemporaryEncryptedPrivateKeyChallenge,
@@ -144,7 +207,7 @@ angular.module("proton.controllers.Auth", [
                             $state.go("secured.inbox");
                         },
                         function(err) {
-                            $log.error('tryDecrypt', err);
+                            $log.error('tryUnlock', err);
                             notify({
                                 classes: 'notification-danger',
                                 message: err.message
@@ -152,15 +215,19 @@ angular.module("proton.controllers.Auth", [
                             $( "[type=password]" ).focus();
                         }
                     );
+                },
+                function(err) {
+                    $log.error('tryUnlock', err);
+
+                    // clear password for user
+                    $scope.selectPassword();
+
+                    notify({
+                        classes: 'notification-danger',
+                        message: err.message
+                    });
                 }
             )
-            .catch(function(err) {
-                $log.error('tryDecrypt', err);
-                notify({
-                    classes: 'notification-danger',
-                    message: err.message
-                });
-            })
         );
     };
 
@@ -168,12 +235,21 @@ angular.module("proton.controllers.Auth", [
         if (event.keyCode === 13) {
             event.preventDefault();
             if ($state.is("login.unlock")) {
-                $scope.tryDecrypt.call(this);
+                $scope.tryUnlock.call(this);
             } else {
                 $scope.tryLogin.call(this);
             }
         }
     };
+
+    $scope.selectPassword = function() {
+        var input = $('#password');
+
+        input.focus();
+        input.select();
+    };
+
+    $scope.initialization();
 })
 
 .controller("SecuredController", function(
@@ -190,7 +266,9 @@ angular.module("proton.controllers.Auth", [
 
     $rootScope.isLoggedIn = true;
     $rootScope.isLocked = false;
-    $rootScope.isSecure = authentication.isSecured;
+    $rootScope.isSecure = function() {
+        return authentication.isSecured();
+    };
 
     Message.totalCount().$promise.then(function(totals) {
         var total = {Labels:{}, Locations:{}, Starred: totals.Starred};

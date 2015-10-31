@@ -7,7 +7,6 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
     $interval,
     $q,
     $rootScope,
-    $sanitize,
     $sce,
     $scope,
     $state,
@@ -15,12 +14,12 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
     $templateCache,
     $timeout,
     $translate,
+    confirmModal,
     CONSTANTS,
     Label,
     Message,
     attachments,
     authentication,
-    contactManager,
     message,
     messageCache,
     messageCounts,
@@ -33,10 +32,9 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
     $scope.tools = tools;
     $scope.isPlain = false;
     $scope.labels = authentication.user.Labels;
+    $scope.attachmentsStorage = [];
 
-    $timeout(function() {
-        $scope.initView();
-    }, 100);
+    $rootScope.$broadcast('updatePageName');
 
     $scope.$watch('message', function() {
         messageCache.put(message.ID, message);
@@ -46,40 +44,25 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
         $scope.message = _.extend($scope.message, m);
     });
 
-    $(window).on('resize', function() {
+    function onResize() {
         $scope.setMessageHeadHeight();
-    });
+        $scope.setAttachmentHeight();
+    }
+
+    $(window).on('resize', onResize);
 
     $scope.$on('$destroy', function() {
-        $(window).off('resize');
+        // off resize
+        $(window).off('resize', onResize);
         // cancel timer ago
         $interval.cancel($scope.agoTimer);
     });
 
     $scope.initView = function() {
-        if(authentication.user.AutoSaveContacts === 1) {
-            $scope.saveNewContacts();
-        }
-
         if(message.IsRead === 0) {
             message.IsRead = 1;
             Message.read({IDs: [message.ID]});
         }
-
-        if (message.SenderAddress==="notify@protonmail.ch" && message.IsEncrypted===0) {
-            message.imagesHidden = false;
-            $scope.displayContent();
-        }
-        else if(authentication.user.ShowImages===1) {
-            message.imagesHidden = false;
-            $scope.displayContent();
-        }
-
-        // fix for firefox
-        var messageHeadH1 = $('.message-head h1').outerHeight()+20;
-        $('.message-head').css({
-            minHeight: messageHeadH1
-        });
 
         // start timer ago
         $scope.agoTimer = $interval(function() {
@@ -107,80 +90,104 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
         messageCache.set([{Action: 3, ID: message.ID, Message: message}]);
     };
 
-    $scope.saveNewContacts = function() {
-        var newContacts = _.filter(message.ToList.concat(message.CCList).concat(message.BCCList), function(email) {
-            return contactManager.isItNew(email);
-        });
-
-        _.each(newContacts, function(email) {
-            contactManager.add(email);
-            email.Email = email.Address;
-            email.Name = email.Name || email.Address;
-        });
-
-        if (newContacts.length > 0) {
-            contactManager.send(newContacts);
-        }
-    };
-
-    $scope.getFrom = function() {
-        var result = '';
-
-        if(angular.isDefined(message.SenderName)) {
-            result += '<b>' + message.SenderName + '</b> &lt;' + message.SenderAddress + '&gt;';
-        } else {
-            result += message.SenderAddress;
-        }
-
-        return result;
-    };
-
     $scope.openSafariWarning = function() {
         $('#safariAttachmentModal').modal('show');
     };
 
     $scope.displayContent = function(print) {
-        message.clearTextBody().then(function(result) {
-            var content;
+        if (message.SenderAddress === "notify@protonmail.ch" && message.IsEncrypted === 0) {
+            message.imagesHidden = false;
+        } else if(authentication.user.ShowImages === 1) {
+            message.imagesHidden = false;
+        }
 
-            if(print === true) {
-                content = result;
-            } else {
-                content = message.clearImageBody(result);
+        message.clearTextBody().then(
+            function(result) {
+                var content;
+
+                if(print === true) {
+                    content = result;
+                } else {
+                    content = message.clearImageBody(result);
+                }
+
+                // safari warning
+                if(!$rootScope.isFileSaverSupported) {
+                    $scope.safariWarning = true;
+                }
+
+                content = DOMPurify.sanitize(content, {
+                    ADD_ATTR: ['target'],
+                    FORBID_TAGS: ['style']
+                });
+
+                if (tools.isHtml(content)) {
+                    $scope.isPlain = false;
+                } else {
+                    $scope.isPlain = true;
+                }
+
+                // for the welcome email, we need to change the path to the welcome image lock
+                content = content.replace("/img/app/welcome_lock.gif", "/assets/img/emails/welcome_lock.gif");
+
+
+                var showMessage = function(content) {
+                    $scope.content = $sce.trustAsHtml(content);
+
+                    $timeout(function() {
+                        tools.transformLinks('message-body');
+                        $scope.setMessageHeadHeight();
+                        $scope.setAttachmentHeight();
+                    });
+
+                    if(print) {
+                        setTimeout(function() {
+                            window.print();
+                        }, 1000);
+                    }                    
+                };
+
+                // PGP/MIME
+                if ( message.IsEncrypted === 8 ) {
+
+                    var mailparser = new MailParser({
+                        defaultCharset: 'UTF-8'
+                    });
+
+                    mailparser.on('end', function(mail) {
+
+                        if (mail.html) {
+                            content = mail.html;
+                        }
+                        else if (mail.text) {
+                            content = mail.text;
+                        }
+                        else {
+                            content = "Empty Message";
+                        }
+
+                        if (mail.attachments) {
+                            content = "<div class='alert alert-danger'><span class='pull-left fa fa-exclamation-triangle'></span><strong>PGP/MIME Attachments Not Supported</strong><br>This message contains attachments which currently are not supported by ProtonMail.</div><br>"+content;
+                        }
+
+                        showMessage(content);
+
+                    });
+
+                    mailparser.write(content);
+                    mailparser.end();
+                }
+                else {
+                    showMessage(content);
+                }
+
+            },
+            function(err) {
+                $scope.togglePlainHtml();
+                //TODO error reporter?
+                $log.error(err);
             }
-
-            // safari warning
-            if(!$scope.isFileSaverSupported) {
-                $scope.safariWarning = true;
-            }
-
-            content = DOMPurify.sanitize(content, {
-                ADD_ATTR: ['target'],
-                FORBID_TAGS: ['style']
-            });
-
-            if (tools.isHtml(content)) {
-                $scope.isPlain = false;
-            } else {
-                $scope.isPlain = true;
-            }
-
-            // for the welcome email, we need to change the path to the welcome image lock
-            content = content.replace("/img/app/welcome_lock.gif", "/assets/img/emails/welcome_lock.gif");
-
-            $scope.content = $sce.trustAsHtml(content);
-
-            $timeout(function() {
-                tools.transformLinks('message-body');
-            });
-
-            if(print) {
-                setTimeout(function() {
-                    window.print();
-                    window.history.back();
-                }, 1000);
-            }
-        });
+        );
     };
 
     $scope.getEmails = function(emails) {
@@ -211,10 +218,11 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
     $scope.toggleImages = function() {
         message.toggleImages();
         $scope.displayContent();
+        $scope.setMessageHeadHeight();
+        $scope.setAttachmentHeight();
     };
 
-    $scope.decryptAttachment = function(message, attachment, $event) {
-
+    $scope.decryptAttachment = function(attachment, $event) {
         $event.preventDefault();
 
         var link = angular.element($event.target);
@@ -234,71 +242,105 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
             return att.then( function(result) {
                 $scope.downloadAttachment(attachment);
                 attachment.decrypting = false;
+                attachment.decrypted = true;
                 $scope.$apply();
             });
         } else {
-            // decode key packets
-            var keyPackets = pmcw.binaryStringToArray(pmcw.decode_base64(attachment.KeyPackets));
-            // get user's pk
-            var key = authentication.getPrivateKey().then(
-                function(pk) {
-                    // decrypt session key from keypackets
-                    return pmcw.decryptSessionKey(keyPackets, pk);
-                }
-            );
+            var attachmentStored = _.findWhere($scope.attachmentsStorage, {ID: attachment.ID});
 
-            // when we have the session key and attachment:
-            $q.all({
-                "attObject": att,
-                "key": key
-             }).then(
-                function(obj) {
-                    // create new Uint8Array to store decryted attachment
-                    var at = new Uint8Array(obj.attObject.data);
+            if(angular.isDefined(attachmentStored)) {
+                $scope.downloadAttachment({
+                    data: attachmentStored.data,
+                    Name: attachmentStored.name,
+                    MIMEType: attachment.MIMEType,
+                    el: $event.target,
+                });
+                attachment.decrypting = false;
+                $scope.$apply();
+            } else {
+                // decode key packets
+                var keyPackets = pmcw.binaryStringToArray(pmcw.decode_base64(attachment.KeyPackets));
+                // get user's pk
+                var key = authentication.getPrivateKey().then(
+                    function(pk) {
+                        // decrypt session key from keypackets
+                        return pmcw.decryptSessionKey(keyPackets, pk);
+                    }
+                );
 
-                    // grab the key
-                    var key = obj.key.key;
+                // when we have the session key and attachment:
+                $q.all({
+                    "attObject": att,
+                    "key": key
+                 }).then(
+                    function(obj) {
+                        // create new Uint8Array to store decryted attachment
+                        var at = new Uint8Array(obj.attObject.data);
 
-                    // grab the algo
-                    var algo = obj.key.algo;
+                        // grab the key
+                        var key = obj.key.key;
 
-                    // decrypt the att
-                    pmcw.decryptMessage(at, key, true, algo)
-                    .then(
-                        function(decryptedAtt) {
-                            $scope.downloadAttachment({
-                                data: decryptedAtt.data,
-                                Name: decryptedAtt.filename,
-                                MIMEType: attachment.MIMEType,
-                                el: $event.target,
-                            });
-                            attachment.decrypting = false;
-                            if(!$scope.isFileSaverSupported) {
-                                $($event.currentTarget)
-                                .prepend('<span class="fa fa-download"></span>');
+                        // grab the algo
+                        var algo = obj.key.algo;
+
+                        // decrypt the att
+                        pmcw.decryptMessage(at, key, true, algo)
+                        .then(
+                            function(decryptedAtt) {
+                                // Store attachment decrypted
+                                $scope.attachmentsStorage.push({
+                                    ID: attachment.ID,
+                                    data: decryptedAtt.data,
+                                    name: decryptedAtt.filename
+                                });
+                                // Call download function
+                                $scope.downloadAttachment({
+                                    data: decryptedAtt.data,
+                                    Name: decryptedAtt.filename,
+                                    MIMEType: attachment.MIMEType,
+                                    el: $event.target,
+                                });
+                                attachment.decrypting = false;
+                                attachment.decrypted = true;
+                                if(!$rootScope.isFileSaverSupported) {
+                                    $($event.currentTarget)
+                                    .prepend('<span class="fa fa-download"></span>');
+                                }
+                                $scope.$apply();
+                            },
+                            function(err) {
+                                $log.error(err);
                             }
-                            $scope.$apply();
-                        }
-                    );
-                },
-                function(err) {
-                    console.log(err);
-                }
-            );
+                        );
+                    },
+                    function(err) {
+                        attachment.decrypting = false;
+                        confirmModal.activate({
+                            params: {
+                                title: 'Unable to decrypt attachment.',
+                                message: '<p>We were not able to decrypt this attachment. The technical error code is:</p><p> <pre>'+err+'</pre></p><p>Email us and we can try to help you with this. <kbd>support@protonmail.ch</kbd></p>',
+                                confirm: function() {
+                                    confirmModal.deactivate();
+                                },
+                                cancel: function() {
+                                    confirmModal.deactivate();
+                                }
+                            }
+                        });
+                    }
+                );
+            }
         }
     };
 
-    $scope.isFileSaverSupported = ('download' in document.createElement('a')) || navigator.msSaveOrOpenBlob;
-
     $scope.downloadAttachment = function(attachment) {
-
         try {
             var blob = new Blob([attachment.data], {type: attachment.MIMEType});
             var link = $(attachment.el);
-            if($scope.isFileSaverSupported) {
+
+            if($rootScope.isFileSaverSupported) {
                 saveAs(blob, attachment.Name);
-            }
-            else {
+            } else {
                 // Bad blob support, make a data URI, don't click it
                 var reader = new FileReader();
 
@@ -390,15 +432,16 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
     // Return Message object to build response or forward
     function buildMessage(action) {
         var base = new Message();
-        var contentSignature = $sanitize('<div>' + tools.replaceLineBreaks($scope.user.Signature) + '</div>');
+        var br = '<br />';
+        var contentSignature = DOMPurify.sanitize('<div>' + tools.replaceLineBreaks($scope.user.Signature) + '</div>');
         var signature = ($(contentSignature).text().length === 0)? '<br /><br />' : '<br /><br />' + contentSignature + '<br /><br />';
-        var blockquoteStart = '<blockquote>';
+        var blockquoteStart = '<blockquote class="protonmail_quote">';
         var originalMessage = '-------- Original Message --------<br />';
         var subject = 'Subject: ' + message.Subject + '<br />';
         var time = 'Time (UTC): ' + $filter('utcReadableTime')(message.Time) + '<br />';
         var from = 'From: ' + message.SenderAddress + '<br />';
         var to = 'To: ' + tools.contactsToString(message.ToList) + '<br />';
-        var cc = 'CC: ' + tools.contactsToString(message.CCList) + '<br />';
+        var cc = (message.CCList.length > 0)?('CC: ' + tools.contactsToString(message.CCList) + '<br />'):('');
         var blockquoteEnd = '</blockquote>';
         var re_prefix = $translate.instant('RE:');
         var fw_prefix = $translate.instant('FW:');
@@ -406,7 +449,7 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
         var fw_length = fw_prefix.length;
 
         base.ParentID = message.ID;
-        base.Body = signature + blockquoteStart + originalMessage + subject + time + from + to + cc + $scope.content + blockquoteEnd;
+        base.Body = signature + blockquoteStart + originalMessage + subject + time + from + to + cc + br + $scope.content + blockquoteEnd;
 
         if(angular.isDefined(message.AddressID)) {
             base.From = _.findWhere(authentication.user.Addresses, {ID: message.AddressID});
@@ -493,7 +536,9 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
     };
 
     $scope.print = function() {
-        $state.go('secured.print', { id: message.ID });
+        var url = $state.href('secured.print', { id: message.ID });
+
+        window.open(url, '_blank');
     };
 
     $scope.viewPgp = function() {
@@ -519,6 +564,23 @@ angular.module("proton.controllers.Messages.View", ["proton.constants"])
 
     $scope.setMessageHeadHeight = function() {
         var messageHeadH1 = $('#messageHead h1').outerHeight();
-        $('#messageHead').css('minHeight', messageHeadH1+20); // 10 for top & bottom margin
+
+        $('#messageHead').css('minHeight', messageHeadH1 + 20); // 10 for top & bottom margin
     };
+
+    $scope.setAttachmentHeight = function() {
+        var count = parseInt(message.Attachments.length);
+        var buttonHeight = 32;
+        var maxHeight = (buttonHeight * 4);
+        var element = $('#attachmentArea');
+
+        if (count > 6) {
+            element.css('minHeight', maxHeight);
+            element.css('maxHeight', maxHeight);
+        } else {
+            element.css('minHeight', ((parseInt(count / 2) + count % 2) * buttonHeight) + buttonHeight + 1);
+        }
+    };
+
+    $scope.initView();
 });

@@ -105,8 +105,11 @@ table.message-list {
                     top: 1px;
                     color: rgba(0, 0, 0, 0.25);
                 }
+                .fa-lock.pgp {
+                    color: #090;
+                }
                 .text-purple {
-                    color: $primary-color-dark;
+                    color: #669;
                 }
                 .fa-unlock-alt,
                 .fa-lock {
@@ -195,24 +198,6 @@ table.message-list {
                 span.labels,
                 td {
                     background-color: $tr-unread-hovered;
-                }
-            }
-        }
-        &.starred {
-            background-color: $tr-starred;
-            i.fa-paperclip,
-            i.fa-clock-o,
-            span.labels,
-            td {
-                background-color: $tr-starred;
-            }
-            &:hover,
-            &:active {
-                i.fa-paperclip,
-                i.fa-clock-o,
-                span.labels,
-                td {
-                    background-color: $tr-starred-hovered;
                 }
             }
         }

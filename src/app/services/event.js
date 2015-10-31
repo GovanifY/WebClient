@@ -1,17 +1,17 @@
 angular.module("proton.event", ["proton.constants"])
 	.service("eventManager", function (
-		$interval, 
-		$window, 
-		$state, 
-		$rootScope, 
-		$stateParams, 
+		$timeout,
+		$window,
+		$state,
+		$rootScope,
+		$stateParams,
 		$cookies,
 		$log,
-		authentication, 
-		Contact, 
-		CONSTANTS, 
-		Events, 
-		messageCache, 
+		authentication,
+		Contact,
+		CONSTANTS,
+		Events,
+		messageCache,
 		messageCounts,
 		notify
 	) {
@@ -30,11 +30,6 @@ angular.module("proton.event", ["proton.constants"])
 			},
 			isDifferent: function (eventID) {
 				return this.ID !== eventID;
-			},
-			checkNotice: function() {
-				return Events.getNoticies({}).then(function(response) {
-					return response;
-				});
 			},
 			manageLabels: function(labels) {
 				if (angular.isDefined(labels)) {
@@ -55,15 +50,15 @@ angular.module("proton.event", ["proton.constants"])
 				if (angular.isDefined(contacts)) {
 					_.each(contacts, function(contact) {
 						if(contact.Action === DELETE) {
-							$rootScope.user.Contacts = _.filter($rootScope.user.Contacts, function(c) { return c.ID !== contact.ID; });
+							authentication.user.Contacts = _.filter(authentication.user.Contacts, function(c) { return c.ID !== contact.ID; });
 						} else if(contact.Action === CREATE) {
-							$rootScope.user.Contacts.push(contact.Contact);
+							authentication.user.Contacts.push(contact.Contact);
 						} else if (contact.Action === UPDATE) {
-							var index = _.findIndex($rootScope.user.Contacts, function(c) { return c.ID === contact.Contact.ID; });
-							$rootScope.user.Contacts[index] = contact.Contact;
+							var index = _.findIndex(authentication.user.Contacts, function(c) { return c.ID === contact.Contact.ID; });
+							authentication.user.Contacts[index] = contact.Contact;
 						}
 						$rootScope.$broadcast('updateContacts');
-						Contact.index.updateWith($rootScope.user.Contacts);
+						Contact.index.updateWith(authentication.user.Contacts);
 					});
 				}
 			},
@@ -113,25 +108,28 @@ angular.module("proton.event", ["proton.constants"])
 				window.sessionStorage[CONSTANTS.EVENT_ID] = id;
 			},
 			manageNotices: function(notices) {
-				for(var i = 0; i<notices.length; i++) {
-					var message = notices[i];
+				if(angular.isDefined(notices)) {
+					for(var i = 0; i < notices.length; i++) {
+						var message = notices[i];
+						var cookie_name = 'NOTICE-'+openpgp.util.hexidump(openpgp.crypto.hash.md5(openpgp.util.str2Uint8Array(message)));
 
-					var cookie_name = 'NOTICE-'+openpgp.util.hexidump(openpgp.crypto.hash.md5(openpgp.util.str2Uint8Array(message)));
-					if ( !$cookies.get( cookie_name ) ) {
-						notify({
-							message: message,
-							duration: '0'
-						});
+						if ( !$cookies.get( cookie_name ) ) {
+							notify({
+								message: message,
+								duration: '0'
+							});
 
-						// 2 week expiration
-						var now = new Date();
-						var expires = new Date(now.getFullYear(), now.getMonth(), now.getDate()+14);
+							// 2 week expiration
+							var now = new Date();
+							var expires = new Date(now.getFullYear(), now.getMonth(), now.getDate()+14);
 
-						$cookies.put(cookie_name, 'true', { expires: expires });
+							$cookies.put(cookie_name, 'true', { expires: expires });
+						}
 					}
 				}
 			},
 			manage: function (data) {
+
 				// Check if eventID is sent
 				if (data.Error) {
 					Events.getLatestID({}).then(function(response) {
@@ -154,27 +152,45 @@ angular.module("proton.event", ["proton.constants"])
 				}
 				this.manageNotices(data.Notices);
 				messageCache.manageExpire();
+			},
+			interval: function() {
+				eventModel.get().then(function (result) {
+
+					// Check for force upgrade
+					if ( angular.isDefined(result.data) && angular.isDefined(result.data.Code) && parseInt(result.data.Code) === 5003 ) {
+						// Force upgrade, kill event loop
+						eventModel.promiseCancel = undefined;
+						return;
+					}
+
+					// Schedule next event API call, do it here so a crash in managing events doesn't kill the loop forever
+					if ( angular.isDefined(eventModel.promiseCancel) ) {
+						eventModel.promiseCancel = $timeout(eventModel.interval, CONSTANTS.INTERVAL_EVENT_TIMER);
+					}
+
+					eventModel.manage(result.data);
+				},
+				function(err) {
+					// Try again later
+					if ( angular.isDefined(eventModel.promiseCancel) ) {
+						eventModel.promiseCancel = $timeout(eventModel.interval, CONSTANTS.INTERVAL_EVENT_TIMER);
+					}
+				});
 			}
 		};
-		var started = false;
+
 		var api = _.bindAll({
 				start: function () {
-					if (!started) {
+					if (angular.isUndefined(eventModel.promiseCancel)) {
 						eventModel.ID = window.sessionStorage[CONSTANTS.EVENT_ID];
-						interval = function() {
-							eventModel.get().then(function (result) {
-								eventModel.manage(result.data);
-							});
-						};
-						interval();
-						eventModel.promiseCancel = $interval(interval, CONSTANTS.INTERVAL_EVENT_TIMER);
-						started = true;
+						eventModel.promiseCancel = $timeout(eventModel.interval, 0);
 					}
 				},
 				stop: function () {
 					messageCache.empty();
-					if (angular.isDefinded(eventModel.promiseCancel)) {
-						$interval.cancel(eventModel.promiseCancel);
+					if (angular.isDefined(eventModel.promiseCancel)) {
+						$timeout.cancel(eventModel.promiseCancel);
+						eventModel.promiseCancel = undefined;
 					}
 				}
 

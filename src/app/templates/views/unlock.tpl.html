@@ -9,13 +9,17 @@
         </h3>
         <p class="text-center">{{ user.Addresses[0].Email }}</p>
         <fieldset class="pure-form">
-            <div class="form-group">
-                <input autocomplete="off" class="form-control dark password" autofocus type="password" ng-keypress="keypress($event)" name="MailboxPassword" ng-model="mailboxPassword" placeholder="Mailbox Password" value="" />
-            </div>
-            <a ui-sref="reset" class="login-support btn">{{ 'FORGOT_PASSWORD?' | translate }}</a>
-            <button type="button" id="enck" class="btn btn-primary pull-right" ng-class="{disabled: networkActivity.loading()}" ng-click="tryDecrypt()">
-                <span>{{ 'UNLOCK' | translate }}</span>
-            </button>
+            <form novalidate role="form" autocomplete="on" ng-submit="tryUnlock()" method="post">
+                <div class="form-group">
+                    <input autocomplete="on" autocapitalize="off" autocorrect="off" class="form-control dark password focus" type="password" ng-keypress="keypress($event)" id="password" name="MailboxPassword" ng-model="mailboxPassword" placeholder="Mailbox Password" value="" />
+                </div>
+                <div class="clearfix">
+                    <a ui-sref="reset" class="login-support btn pull-left">{{ 'FORGOT_PASSWORD?' | translate }}</a>
+                    <button type="submit" id="enck" class="btn btn-primary pull-right" ng-class="{disabled: networkActivity.loading()}">
+                        <span>{{ 'UNLOCK' | translate }}</span>
+                    </button>
+                </div>
+            </form>
         </fieldset>
     </div>
 </div>

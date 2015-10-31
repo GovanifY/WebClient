@@ -17,10 +17,14 @@ angular.module("proton.authentication", [
     notify,
     CONFIG
 ) {
+
     // PRIVATE FUNCTIONS
     var auth = {
+
         // These headers are used just once for the /cookies route, then we forget them and use cookies and x-pm-session header instead.
         setAuthHeaders: function() {
+
+            this.headersSet = true;
             // API version
             if ( auth.data.SessionToken ) {
                 // we have a session token, so we can remove the old stuff
@@ -44,13 +48,11 @@ angular.module("proton.authentication", [
 
             var deferred = $q.defer();
 
-            api.user = $http.get(url.get() + "/users", {
+            $http.get(url.get() + "/users", {
                 params: {
                     id: uid
                 }
-            });
-
-            api.user.then(
+            }).then(
                 function(result) {
 
                     var user = result.data.User;
@@ -118,10 +120,10 @@ angular.module("proton.authentication", [
             var session = window.sessionStorage[CONSTANTS.OAUTH_KEY + ":SessionToken"];
             if (session) {
                 auth.data = {
-                    SessionToken: session
+                    SessionToken: pmcw.decode_base64(session)
                 };
 
-                auth.mailboxPassword = api.getPassword();
+                auth.mailboxPassword = this.getPassword();
 
                 if (auth.mailboxPassword) {
                     pmcw.setMailboxPassword(auth.mailboxPassword);
@@ -167,7 +169,7 @@ angular.module("proton.authentication", [
                 }
                 return result;
             } else {
-                return api.semiRandomString(length);
+                return this.semiRandomString(length);
             }
         },
 
@@ -186,7 +188,10 @@ angular.module("proton.authentication", [
         getPrivateKey: function() {
             var pw = pmcw.decode_utf8_base64(window.sessionStorage.getItem(CONSTANTS.MAILBOX_PASSWORD_KEY));
 
-            return pmcw.decryptPrivateKey(this.user.EncPrivateKey, pw);
+            return pmcw.decryptPrivateKey(this.user.EncPrivateKey, pw).catch( function(err) {
+                $log.error( this.user.EncPrivateKey );
+                throw err;
+            }.bind(this));
         },
 
         getRefreshCookie: function() {
@@ -223,7 +228,7 @@ angular.module("proton.authentication", [
                 GrantType: "refresh_token",
                 RefreshToken: $rootScope.TemporaryAccessData.RefreshToken,
                 RedirectURI: "https://protonmail.ch",
-                State: api.randomString(24)
+                State: this.randomString(24)
             })
             .then(
                 function(response) {
@@ -254,7 +259,7 @@ angular.module("proton.authentication", [
                 },
                 function(err) {
                     $log.error('setAuthCookie2', err);
-                    deferred.reject({message: err});
+                    deferred.reject({ message: "Error setting authentication cookies." });
                 }
             );
 
@@ -272,13 +277,13 @@ angular.module("proton.authentication", [
                 delete $http.defaults.headers.common.Accept;
                 $rootScope.creds = creds;
                 $http.post(url.get() + "/auth",
-                    _.extend(_.pick(creds, "Username", "Password", "HashedPassword"), {
+                    _.extend(_.pick(creds, "Username", "Password"), {
                         ResponseType: "token",
                         ClientID: CONFIG.clientID,
                         ClientSecret: CONFIG.clientSecret,
                         GrantType: "password",
                         RedirectURI: "https://protonmail.ch",
-                        State: api.randomString(24),
+                        State: this.randomString(24),
                         Scope: "full" // 'full' or 'reset'
                     })
                 ).then(
@@ -290,6 +295,7 @@ angular.module("proton.authentication", [
                         // this is a trick! we dont know if we should go to unlock or step2 because we dont have user's data yet. so we redirect to the login page (current page), and this is determined in the resolve: promise on that state in the route. this is because we dont want to do another fetch info here.
                     },
                     function(error) {
+                        // TODO: This is almost certainly broken, not sure it needs to work though?
                         console.log(error);
                         deferred.reject({
                             message: error.error_description
@@ -306,11 +312,11 @@ angular.module("proton.authentication", [
             // $log.debug('isLoggedIn');
             // console.log(auth);
             // console.log(auth.data);
-            // console.log(api.refreshTokenIsDefined());
+            // console.log(this.refreshTokenIsDefined());
 
-            var loggedIn = auth.data && api.sessionTokenIsDefined();
+            var loggedIn = auth.data && this.sessionTokenIsDefined();
 
-            if (loggedIn && api.user === null) {
+            if (loggedIn && !!!auth.headersSet) {
                 auth.setAuthHeaders();
             }
             // $log.debug('isLoggedIn:',loggedIn);
@@ -329,19 +335,20 @@ angular.module("proton.authentication", [
 
         // Whether the mailbox' password is accessible, or if the user needs to re-enter it
         isLocked: function() {
-            return !api.isLoggedIn() || _.isUndefined(auth.mailboxPassword);
+            return !this.isLoggedIn() || _.isUndefined(auth.mailboxPassword);
         },
 
+        // TODO, aren't isLocked and isSecured exact opposites of one another? Why do they both exist?
         // Logged in and MBPW is set
         isSecured: function() {
-            return api.isLoggedIn() && !api.isLocked();
+            return this.isLoggedIn() && !this.isLocked();
         },
 
         // Return a state name to be in in case some user authentication step is required.
         // This will null if the logged in and unlocked.
         state: function() {
-            if (api.isLoggedIn()) {
-                return api.isLocked() ? "login.unlock" : null;
+            if (this.isLoggedIn()) {
+                return this.isLocked() ? "login.unlock" : null;
             } else {
                 return "login";
             }
@@ -349,22 +356,22 @@ angular.module("proton.authentication", [
 
         // Redirect to a new authentication state, if required
         redirectIfNecessary: function() {
-            $log.debug('refreshIfNecessary');
-            var newState = api.state();
+            var newState = this.state();
+            
             if (newState) {
                 $state.go(newState);
             }
         },
 
         // refreshIfNecessary: function(force) {
-        //     if ((auth.data && auth.data.shouldRefresh && api.refreshTokenIsDefined()) || !!force) {
+        //     if ((auth.data && auth.data.shouldRefresh && this.refreshTokenIsDefined()) || !!force) {
         //         $http.post(
         //             url.get() + "/auth/refresh",
         //             _.extend(_.pick(auth.data, "RefreshToken"), {
         //                 ClientID: CONFIG.clientID,
         //                 ClientSecret: CONFIG.clientSecret,
         //                 GrantType: "refresh_token",
-        //                 State: api.randomString(24),
+        //                 State: this.randomString(24),
         //                 ResponseType: "token",
         //             })
         //         ).then(
@@ -373,7 +380,7 @@ angular.module("proton.authentication", [
         //             },
         //             function(resp) {
         //                 if(resp.error) {
-        //                     api.logout();
+        //                     this.logout();
         //                 }
         //                 errorReporter.catcher("Something went wrong with authentication");
         //             }
@@ -382,24 +389,37 @@ angular.module("proton.authentication", [
         // },
 
         // Removes all connection data
-        logout: function() {
+        logout: function(reload) {
+
+            if (reload===undefined) {
+                reload = true;
+            }
+            
             var sessionToken = window.sessionStorage[CONSTANTS.OAUTH_KEY+":SessionToken"];
             var uid = window.sessionStorage[CONSTANTS.OAUTH_KEY+":Uid"];
-            // Completely clear sessionstorage
-            window.sessionStorage.clear();
-
-            delete auth.data;
-            delete auth.mailboxPassword;
-
-            this.user = null;
 
             // HACKY ASS BUG
-            if(angular.isDefined(sessionToken) || angular.isDefined(uid)) {
-                $http.delete(url.get() + "/auth").then( function() {
+            var clearData = function() {
+
+                // Completely clear sessionstorage
+                window.sessionStorage.clear();
+
+                delete auth.data;
+                delete auth.mailboxPassword;
+                auth.headersSet = false;
+                // TODO clean this, up, need to reset $http headers if we hope to get rid of hack
+
+                this.user = null;
+                window.onbeforeunload = undefined;
+                if (reload) {
                     location.reload();
-                });
+                }
+            };
+
+            if(angular.isDefined(sessionToken) || angular.isDefined(uid)) {
+                $http.delete(url.get() + "/auth").then( clearData, clearData );
             } else {
-                location.reload();
+                clearData();
             }
 
             // THIS SHOULD BE RE-ENABLED WHEN WE FIX THE BUG
@@ -424,9 +444,9 @@ angular.module("proton.authentication", [
                 pmcw.checkMailboxPassword(epk, pwd, accessToken)
                 .then(
                     function(response) {
-                        api.savePassword(pwd);
+                        this.savePassword(pwd);
                         auth.mailboxPassword = pwd;
-                        api.receivedCredentials({
+                        this.receivedCredentials({
                             "AccessToken": response,
                             "RefreshToken": TemporaryAccessData.RefreshToken,
                             "Uid": TemporaryAccessData.Uid,
@@ -434,7 +454,7 @@ angular.module("proton.authentication", [
                             "EventID": TemporaryAccessData.EventID
                         });
                         req.resolve(200);
-                    },
+                    }.bind(this),
                     function(rejection) {
                         // console.log(rejection);
                         req.reject({
@@ -445,7 +465,7 @@ angular.module("proton.authentication", [
             }
             else {
                 req.reject({
-                    message: "Password is required"
+                    message: "Password is required."
                 });
             }
 
@@ -469,9 +489,10 @@ angular.module("proton.authentication", [
                     }
 
                     $rootScope.isLoggedIn = true;
+                    // Why are we setting this in two places?
                     $rootScope.user = user;
                     this.user = user;
-                    this.user.Theme = atob(user.Theme);
+                    this.user.Theme = user.Theme;
 
                     return user;
                 }.bind(this),
@@ -484,7 +505,9 @@ angular.module("proton.authentication", [
         }
     };
 
+    // Initialization
     api.user = null;
+    auth.headersSet = false;
 
     return api;
 })
@@ -495,8 +518,7 @@ angular.module("proton.authentication", [
     $rootScope.isLoggedIn = authentication.isLoggedIn();
     $rootScope.isLocked = authentication.isLocked();
     $rootScope.logout = function() {
-        authentication.logout();
         eventManager.stop();
-        $scope.error = null;
+        authentication.logout();
     };
 });

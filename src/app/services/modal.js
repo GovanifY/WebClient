@@ -1,6 +1,14 @@
 angular.module("proton.modals", [])
 
-.factory('pmModal', ['$animate', '$compile', '$rootScope', '$controller', '$q', '$http', '$templateCache', function($animate, $compile, $rootScope, $controller, $q, $http, $templateCache) {
+.factory('pmModal', function(
+    $animate,
+    $compile,
+    $rootScope,
+    $controller,
+    $q,
+    $http,
+    $templateCache
+) {
     return function modalFactory(config) {
         if (!(!config.template ^ !config.templateUrl)) {
             throw new Error('Expected modal to have exacly one of either template or templateUrl');
@@ -84,7 +92,7 @@ angular.module("proton.modals", [])
             active: active
         };
     };
-}])
+})
 
 // confirm modal
 .factory('confirmModal', function(pmModal) {
@@ -114,7 +122,14 @@ angular.module("proton.modals", [])
 .factory('alertModal', function(pmModal) {
     return pmModal({
         controller: function(params) {
+            this.title = params.title;
             this.message = params.message;
+
+            if(angular.isDefined(params.alert)) {
+                this.alert = params.alert;
+            } else {
+                this.alert = 'alert-info';
+            }
 
             this.ok = function() {
                 if (angular.isDefined(params.ok) && angular.isFunction(params.ok)) {
@@ -127,23 +142,18 @@ angular.module("proton.modals", [])
     });
 })
 
-.factory('closeModal', function(pmModal) {
+// login help modal
+.factory('loginModal', function(pmModal) {
     return pmModal({
         controller: function(params) {
-            this.discard = function() {
-                if(angular.isDefined(params.discard) && angular.isFunction(params.discard)) {
-                    params.discard();
-                }
-            };
-
             this.cancel = function() {
-                if(angular.isDefined(params.cancel) && angular.isFunction(params.cancel)) {
+                if (angular.isDefined(params.cancel) && angular.isFunction(params.cancel)) {
                     params.cancel();
                 }
             };
         },
         controllerAs: 'ctrl',
-        templateUrl: 'templates/modals/close.tpl.html'
+        templateUrl: 'templates/modals/loginHelp.tpl.html'
     });
 })
 
@@ -221,20 +231,6 @@ angular.module("proton.modals", [])
                 '#c6cd97',
                 '#e7d292',
                 '#dfb286'
-                // '#f66',
-                // '#ff9',
-                // '#f6f',
-                // '#6ff',
-                // '#66f',
-                // '#6f6',
-                // '#999',
-                // '#fcc',
-                // '#ffc',
-                // '#fcf',
-                // '#cff',
-                // '#ccf',
-                // '#cfc',
-                // '#ccc'
             ];
 
             if(angular.isDefined(params.label)) {
@@ -276,6 +272,9 @@ angular.module("proton.modals", [])
             var idSelectedFile = 'selectedFile';
             var extension;
             var self = this;
+
+            this.title = params.title;
+            this.message = params.message;
 
             function init() {
                 var drop = document.getElementById(idDropzone);
@@ -320,9 +319,6 @@ angular.module("proton.modals", [])
                     }
                 });
             }
-
-            this.title = params.title;
-            this.message = params.message;
 
             this.import = function() {
                 if (angular.isDefined(params.import) && angular.isFunction(params.import)) {

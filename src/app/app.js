@@ -56,9 +56,6 @@ angular.module("proton", [
     "proton.tooltip",
     "proton.emailField",
     "proton.enter",
-    "proton.delayedPassword",
-    "proton.fieldMatch",
-    "proton.fieldFocus",
     "proton.squire",
     "proton.locationTag",
     "proton.dropzone",
@@ -70,7 +67,6 @@ angular.module("proton", [
 
     // Controllers
     "proton.controllers.Account",
-    "proton.controllers.Admin",
     "proton.controllers.Auth",
     "proton.controllers.Bug",
     "proton.controllers.Contacts",
@@ -113,59 +109,83 @@ angular.module("proton", [
     urlProvider.setBaseUrl(CONFIG.apiUrl);
 })
 
+.run(function(CONSTANTS) {
+    // This function clears junk from session storage. Should not be needed forever
+    try {
+        var whitelist = [
+            CONSTANTS.EVENT_ID,
+            CONSTANTS.MAILBOX_PASSWORD_KEY,
+            CONSTANTS.OAUTH_KEY+":SessionToken",
+            CONSTANTS.OAUTH_KEY + ":Uid",
+            CONSTANTS.OAUTH_KEY + ":AccessToken",
+            CONSTANTS.OAUTH_KEY + ":RefreshToken",
+            "proton:decrypted_token",
+            "proton:encrypted_password"
+        ];
+
+        var data = {};
+        for( var i=0; i<whitelist.length; i++) {
+            var item = window.sessionStorage.getItem(whitelist[i]);
+            if( angular.isString(item) ) {
+                data[whitelist[i]] = item;
+            }
+        }
+
+        window.sessionStorage.clear();
+
+        for (var key in data) {
+            window.sessionStorage.setItem(key, data[key]);
+        }
+    }
+    catch(err) {
+        // Do nothing, session storage support checked for elsewhere
+    }
+})
 
 .run(function(
     $document,
     $rootScope,
+    $state,
+    $timeout,
+    authentication,
     networkActivityTracker,
     notify,
-    $state,
-    tools,
-    authentication
+    tools
 ) {
+    var debounce;
+
     $(window).bind('resize load', function() {
-        $rootScope.isMobile = (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || $(window).width() < 500) ? true : false;
+        $timeout.cancel(debounce);
+        $timeout(function() {
+            $rootScope.isMobile = tools.findBootstrapEnvironment() === 'xs';
+        }, 100);
     });
+
     $(window).bind('load', function() {
         if (window.location.hash==='#spin') {
             $('body').append('<style>.wrap, .btn{-webkit-animation: lateral 4s ease-in-out infinite;-moz-animation: lateral 4s ease-in-out infinite;}</style>');
         }
     });
 
-    $rootScope.firstNameOnly = function() {
-        var firstNameOnly;
-
-        if(authentication.user) {
-            firstNameOnly = authentication.user.DisplayName;
-        } else {
-            firstNameOnly = $rootScope.tempUser.username;
-        }
-
-        return firstNameOnly;
-    };
-
-    $rootScope.browser = tools.getBrowser;
+    $rootScope.browser = tools.getBrowser();
     $rootScope.terminal = false;
     $rootScope.updateMessage = false;
 
     var pageTitleTemplate = _.template(
         "<% if (pageName) { %>" +
-        "${ _.string.capitalize(pageName) }" +
-        "<% if (unreadCount) { %>" +
-        " (&thinsp;${unreadCount}&thinsp;)" +
-        "<% } %> " +
-        "&middot; " +
+        "${ pageName }" +
+        " - " +
         "<% } %>" +
         "ProtonMail"
     );
-    $rootScope.$watchGroup(["pageName", "unreadCount"], function(values) {
-        $document.find("title").html(pageTitleTemplate({
-            pageName: values[0],
-            unreadCount: values[1]
-        }));
+
+    $rootScope.$watch('pageName', function(newVal, oldVal) {
+        $document.find("title").text(pageTitleTemplate({ pageName: newVal }));
     });
+
     $rootScope.networkActivity = networkActivityTracker;
     $rootScope.toggleSidebar = false;
+
     // notification service config
     // https://github.com/cgross/angular-notify
     notify.config({
@@ -182,19 +202,16 @@ angular.module("proton", [
 .factory('authHttpResponseInterceptor', function($q, $injector, $rootScope) {
     return {
         response: function(response) {
-            if (response.data.Code!==undefined) {
+            if (angular.isDefined(response.data) && angular.isDefined(response.data.Code)) {
                 // app update needd
                 if (response.data.Code===5003) {
                     if ($rootScope.updateMessage===false) {
                         $rootScope.updateMessage = true;
                         $injector.get('notify')({
-                            classes: 'notification-info',
-                            message: 'A new version of ProtonMail is available. Logout and log back in to automatically update.',
-                            duration: 10000
+                            classes: 'notification-info noclose',
+                            message: 'A new version of ProtonMail is available. Please refresh this page and then logout and log back in to automatically update.',
+                            duration: '0'
                         });
-                        setTimeout( function() {
-                            $rootScope.updateMessage = false;
-                        }, 11000);
                     }
                 }
                 else if(response.data.Code===5004) {
@@ -221,17 +238,20 @@ angular.module("proton", [
             return response || $q.when(response);
         },
         responseError: function(rejection) {
-            // console.log(rejection);
-            // console.log(rejection.config);
-            if (rejection.status === 401) {
-                if ($rootScope.doRefresh===true) {
+            if(rejection.status === 0) {
+                $injector.get('notify')({
+                    message: 'You are not connected to the Internet.',
+                    classes: 'notification-danger',
+                    duration: 0
+                });
+            } else if (rejection.status === 401) {
+                if ($rootScope.doRefresh === true) {
                     $rootScope.doRefresh = false;
                     $injector.get('authentication').getRefreshCookie()
                     .then(
                         function() {
                             var $http = $injector.get('$http');
-                            // console.log(rejection.config);
-                            // rejection.config.headers.common['x-pm-session']
+
                             _.extend(rejection.config.headers, $http.defaults.headers.common);
                             return $http(rejection.config);
                         },
@@ -240,12 +260,12 @@ angular.module("proton", [
                             $injector.get('$state').go('login');
                         }
                     );
-                }
-                else {
+                } else {
                     $injector.get('authentication').logout();
                     $injector.get('$state').go('login');
                 }
             }
+
             return $q.reject(rejection);
         }
     };
@@ -287,14 +307,6 @@ angular.module("proton", [
             return;
         }
 
-        // If already logged in and on the login page: redirect to unlock page
-        else if ($rootScope.isLoggedIn && isLogin) {
-            $log.debug('appjs:($rootScope.isLoggedIn && isLogin)');
-            event.preventDefault();
-            $state.go('secured.inbox');
-            return;
-        }
-
         // If already logged in and unlocked and on the unlock page: redirect to inbox
         else if ($rootScope.isLoggedIn && !$rootScope.isLocked && isUnlock) {
             $log.debug('appjs:($rootScope.isLoggedIn && !$rootScope.isLocked && isUnlock)');
@@ -324,14 +336,17 @@ angular.module("proton", [
         $(".navbar-toggle").click();
 
         $rootScope.toState = toState.name.replace(".", "-");
-        if ($rootScope.scrollToBottom===true) {
+
+        if($rootScope.scrollToBottom === true) {
             setTimeout(function() {
                 $('#content').animate({
                     scrollTop: $("#pageBottom").offset().top
                 }, 1);
             }, 10);
+
             $rootScope.scrollToBottom = false;
         }
+
         $('#loading').remove();
     });
 })
@@ -360,52 +375,6 @@ angular.module("proton", [
 .run(function($log) {
     $log.info('Find a security bug? security@protonmail.ch');
     $log.info('We\'re hiring! https://protonmail.ch/pages/join-us.html');
-})
-
-//
-// Setup keyboard bindings
-//
-
-.run(function(
-    $state,
-    $stateParams
-) {
-    // Mousetrap.bind(["ctrl+n", "c"], function() {
-    //     if ($state.includes("secured.**")) {
-    //         $state.go("secured.compose");
-    //     }
-    // });
-    // Mousetrap.bind(["i"], function() {
-    //     if ($state.includes("secured.**")) {
-    //         $state.go("secured.inbox");
-    //     }
-    // });
-    // Mousetrap.bind(["s"], function() {
-    //     if ($state.includes("secured.**")) {
-    //         $state.go("secured.starred");
-    //     }
-    // });
-    // Mousetrap.bind(["d"], function() {
-    //     if ($state.includes("secured.**")) {
-    //         $state.go("secured.drafts");
-    //     }
-    // });
-    // Mousetrap.bind("r", function() {
-    //     if ($state.includes("secured.*.message")) {
-    //         $state.go("secured.reply", {
-    //             action: 'reply',
-    //             id: $stateParams.ID
-    //         });
-    //     }
-    // });
-    // Mousetrap.bind("f", function() {
-    //     if ($state.includes("secured.*.message")) {
-    //         $state.go("secured.reply", {
-    //             action: 'forward',
-    //             id: $stateParams.ID
-    //         });
-    //     }
-    // });
 })
 
 //
@@ -439,6 +408,7 @@ angular.module("proton", [
 })
 
 .run(function($rootScope) {
+    $rootScope.isFileSaverSupported = !!(('download' in document.createElement('a')) || navigator.msSaveOrOpenBlob);
     // Set build config
     $rootScope.build = {
         "version":"2.0",
@@ -447,15 +417,74 @@ angular.module("proton", [
     };
 })
 
+/**
+ * Detect if the user use safari private mode
+ */
+.run(function(notify, tools) {
+    if(tools.hasSessionStorage() === false) {
+        notify({
+            message: 'You are in Private Mode or have Session Storage disabled.\nPlease deactivate Private Mode and then reload the page.',
+            classes: 'notification-danger',
+            duration: 0
+        });
+    }
+})
+
 //
 // Handle some application exceptions
 //
 
-.factory('$exceptionHandler', function($injector) {
+.factory('$exceptionHandler', function($log, $injector, CONFIG) { // function($injector, $log) {
+    var n_reports = 0;
     return function(exception, cause) {
-        var errorReporter = $injector.get("errorReporter");
-        if (exception.message.indexOf("$sanitize:badparse") >= 0) {
-            errorReporter.notify("There was an error while trying to display this message.", exception);
+        n_reports++;
+        $log.error( exception );
+
+        if ( n_reports < 6 ) {
+            var debug;
+            if ( exception instanceof Error ) {
+                debug = { 'message': exception.message, 'stack': exception.stack };
+            }
+            else if ( angular.isString( exception ) ) {
+                debug = exception;
+            }
+            else {
+                try {
+                    var json = angular.toJson( exception );
+                    if ( $.isEmptyObject( json ) ) {
+                        debug = exception.toString();
+                    }
+                    else {
+                        debug = exception;
+                    }
+                }
+                catch(err) {
+                    debug = err.message;
+                }
+            }
+
+            try {
+                var url = $injector.get("url");
+                var $http = $injector.get("$http");
+                var tools = $injector.get("tools");
+                var $state = $injector.get("$state");
+                var crashData = {
+                    OS:             tools.getOs,
+                    OSVersion:      '',
+                    Browser:         tools.getBrowser,
+                    BrowserVersion:  tools.getBrowserVersion,
+                    Client:         'Angular',
+                    ClientVersion:  CONFIG.app_version,
+                    Debug: { 'state': $state.$current.name, 'error': debug },
+                };
+                crashPromise = $http.post( url.get() + '/bugs/crash', crashData )
+                    .catch(function(err) {
+                        // Do nothing
+                    });
+            }
+            catch(err) {
+                // Do nothing
+            }
         }
     };
 });

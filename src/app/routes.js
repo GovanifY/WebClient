@@ -26,7 +26,7 @@ angular.module("proton.routes", [
             ) {
                 if (authentication.isLoggedIn()) {
                     return networkActivityTracker.track(
-                        messageCache.get($stateParams.id).$promise
+                        messageCache.get($stateParams.id)
                     );
                 }
             }
@@ -165,7 +165,7 @@ angular.module("proton.routes", [
             }
         },
         resolve: {
-            validate: function($http, url, CONFIG, $state, $stateParams, $rootScope, notify) {
+            validate: function($http, url, CONFIG, $state, $stateParams, $rootScope, notify, authentication) {
                 $http.post(
                     url.get() + "/users/" + $stateParams.token + "/check",
                     {Username: $stateParams.user}
@@ -173,6 +173,10 @@ angular.module("proton.routes", [
                 .then(
                     function( response) {
                         if (response.data.Valid===1) {
+
+                            // clear user data if already logged in:
+                            authentication.logout(false);
+
                             $rootScope.allowedNewAccount = true;
                             $rootScope.inviteToken = $stateParams.token;
                             $rootScope.preInvited = true;
@@ -212,7 +216,12 @@ angular.module("proton.routes", [
                     function() {
                         $rootScope.pubKey = authentication.user.PublicKey;
                         $rootScope.user = authentication.user;
-                        $rootScope.user.DisplayName = authentication.user.addresses[0].Email;
+                        if (authentication.user.addresses) {
+                            $rootScope.user.DisplayName = authentication.user.addresses[0].Email;
+                        }
+                        else {
+                            $rootScope.user.DisplayName = '';
+                        }
                         if ($rootScope.pubKey === 'to be modified') {
                             $state.go('step2');
                             return;
@@ -401,6 +410,7 @@ angular.module("proton.routes", [
         }
     })
 
+    // Deprecated?
     .state("support.reset-mailbox", {
         url: "/reset-mailbox/:token",
         onEnter: function($stateParams, $state, $rootScope, authentication) {
@@ -442,7 +452,7 @@ angular.module("proton.routes", [
         views: {
             "content": {
                 templateUrl: "templates/views/outside.unlock.tpl.html",
-                controller: function($scope, $state, $stateParams, pmcw, encryptedToken, networkActivityTracker) {
+                controller: function($scope, $state, $stateParams, pmcw, encryptedToken, networkActivityTracker, notify) {
                     $scope.params = {};
                     $scope.params.MessagePassword = '';
 
@@ -460,6 +470,8 @@ angular.module("proton.routes", [
                             window.sessionStorage["proton:decrypted_token"] = decryptedToken;
                             window.sessionStorage["proton:encrypted_password"] = pmcw.encode_utf8_base64($scope.params.MessagePassword);
                             $state.go('eo.message', {tag: $stateParams.tag});
+                        }, function(err) {
+                            notify({message: err.message, classes: 'notification-danger'});
                         });
                     };
                 }
@@ -691,53 +703,6 @@ angular.module("proton.routes", [
             );
         }
 
-    })
-
-    // -------------------------------------------
-    //  ADMIN ROUTES
-    // -------------------------------------------
-
-    .state("admin", {
-        url: "/admin",
-        views: {
-            "main@": {
-                controller: "AdminController",
-                templateUrl: "templates/layout/admin.tpl.html"
-            },
-            "content@admin": {
-                templateUrl: "templates/views/admin.tpl.html"
-            }
-        }
-    })
-
-    .state("admin.invite", {
-        url: "/invite",
-        views: {
-            "content@admin": {
-                templateUrl: "templates/views/admin.invite.tpl.html",
-                controller: "AdminController"
-            }
-        }
-    })
-
-    .state("admin.monitor", {
-        url: "/monitor",
-        views: {
-            "content@admin": {
-                templateUrl: "templates/views/admin.monitor.tpl.html",
-                controller: "AdminController"
-            }
-        }
-    })
-
-    .state("admin.logs", {
-        url: "/logs",
-        views: {
-            "content@admin": {
-                templateUrl: "templates/views/admin.logs.tpl.html",
-                controller: "AdminController"
-            }
-        }
     });
 
     _.each(CONSTANTS.MAILBOX_IDENTIFIERS, function(id_, box) {

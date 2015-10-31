@@ -1,5 +1,5 @@
 <div ng-controller="HeaderController">
-    <div class="spinner" ng-show="networkActivity.loading()">
+    <div class="spinner" ng-if="networkActivity.loading()">
         <div class="bounce1"></div>
         <div class="bounce2"></div>
         <div class="bounce3"></div>
@@ -16,7 +16,7 @@
                 </a>
             </div>
             <div class="collapse navbar-collapse">
-                <form id="search-form" class="navbar-form navbar-left visible-md-block visible-lg-block" role="search" ng-class="{'focus': !!searchInputFocus}" ng-if="'secured.**' | includedByState">
+                <form id="search-form" class="navbar-form navbar-left visible-md-block visible-lg-block" role="search" ng-class="{'focus': !!searchInputFocus}" ng-if="'secured.**' | includedByState" method="post">
                     <div class="input-group form-group">
                         <input type="text" class="form-control" placeholder="{{ 'SEARCH_MESSAGES' | translate }}" autocomplete="off" ng-model="params.searchInput" ng-enter="searchMessages()" />
                         <span class="input-group-btn">
@@ -41,14 +41,14 @@
                     </li>
                     <li>
                         <a href ng-click="openReportModal()">
-                            <i class="fa fa-bug"></i>
+                            <span class="visible-lg-inline-block fa fa-bug"></span>
                             {{ 'REPORT_BUG' | translate }}
                         </a>
                     </li>
                     <li class="dropdown" ng-if="isLoggedIn">
-                        <a href class="dropdown-toggle" data-toggle="dropdown">
+                        <a href class="dropdown-toggle" data-toggle="dropdown" title="{{ email() }}">
                             <span class="visible-lg-inline-block fa fa-user"></span>
-                            <em ng-bind="firstNameOnly()"></em> <i class="fa fa-caret-down"></i>
+                            <em ng-bind="displayName()"></em> <i class="fa fa-caret-down"></i>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-right" role="menu">
                             <!-- <li>
@@ -99,10 +99,10 @@
                         <a ng-click="openNewMessage();closeMobileDropdown();"><span class="fa fa-pencil"></span> {{ 'COMPOSE' | translate }}</a>
                     </li>
                     <li class="list-group-item">
-                        <a ui-sref="secured.inbox" ng-class="{ active: ('secured.inbox.**' | includedByState) }"><span class="fa fa-inbox"></span> {{ 'INBOX' | translate }}<span class="label" ng-class="{active: unreadCount > 0}">{{unreadCount}}</span></a>
+                        <a ui-sref="secured.inbox" ng-class="{ active: ('secured.inbox.**' | includedByState) }"><span class="fa fa-inbox"></span> {{ 'INBOX' | translate }}</a>
                     </li>
                     <li class="list-group-item">
-                        <a ui-sref="secured.drafts" ng-class="{ active: ('secured.drafts.**' | includedByState) }"><span class="fa fa-file-text-o"></span> {{ 'DRAFTS' | translate }}<span class="label" ng-class="{active: draftsCount > 0}">{{draftsCount}}</span></a>
+                        <a ui-sref="secured.drafts" ng-class="{ active: ('secured.drafts.**' | includedByState) }"><span class="fa fa-file-text-o"></span> {{ 'DRAFTS' | translate }}</a>
                     </li>
                     <li class="list-group-item">
                         <a ui-sref="secured.sent" ng-class="{ active: ('secured.sent.**' | includedByState) }"><span class="fa fa-sign-out"></span> {{ 'SENT' | translate }}</a>
